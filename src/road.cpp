@@ -136,7 +136,7 @@ vector<double> Road::getFrenet(double x, double y, double theta)
 }
 
 // Transform from Frenet s,d coordinates to Cartesian x,y
-vector<double> Road::getXY(double s, double d)
+vector<double>  Road::getXY(double s, double d) const
 {
 	int prev_wp = -1;
 

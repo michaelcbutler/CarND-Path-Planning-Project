@@ -34,38 +34,23 @@ void Vehicle::update_ref_state() {
  
 }
 
-void Vehicle::compute_path(Road & r) {
+void Vehicle::generate_path_points(const Road &r) {
 
   // some hyperparameters
-  const double delta_t = 0.02; // seconds per iteration
   const double D = 30.0; // waypoint spacing (meters) // TODO: too large?
-  const int target_lane = 1; // middle lane, RHS
 
-  double target_d = (target_lane + 0.5)*r.lane_width;
-
-  std::cout << "prev_path_length = " << prev_path_length << std::endl;
-  // TODO: resize previous_path if too long?
-
-  // slow down for some car too close ahead
-  if (car_close_ahead(r.sensor_fusion, target_d, delta_t, r.lane_width)) {
-    //ref_vel -= 0.1;
-    target_d -= r.lane_width;
-  }
-  else if (ref_vel < target_vel) {
-    ref_vel += 0.1;
-  }
-
+  // define 3 waypoints beyond previous path
   std::vector<double> wp0 = r.getXY(ref_s + D,   target_d);
   std::vector<double> wp1 = r.getXY(ref_s + 2*D, target_d);
   std::vector<double> wp2 = r.getXY(ref_s + 3*D, target_d);
 
   // path definition in world coordinates
-  std::vector<double> w_x = {pred_x, ref_x, wp0[0], wp1[0], wp2[0]};
-  std::vector<double> w_y = {pred_y, ref_y, wp0[1], wp1[1], wp2[1]};
+  std::vector<double> w_x = {pred_x, ref_x, wp0[0], wp1[0], wp2[0]}; // world x
+  std::vector<double> w_y = {pred_y, ref_y, wp0[1], wp1[1], wp2[1]}; // world y
 
   // transform into vehicle coordinate system with origin at reference point
-  std::vector<double> v_x;
-  std::vector<double> v_y;
+  std::vector<double> v_x; // vehicle x
+  std::vector<double> v_y; // vehicle y
   for (int i = 0; i < w_x.size(); ++i) {
     double delta_x = w_x[i] - ref_x;
     double delta_y = w_y[i] - ref_y;
@@ -92,13 +77,11 @@ void Vehicle::compute_path(Road & r) {
 
   double target_x = D;
   double target_y = s(target_x);
-  double target_dist = sqrt(target_x*target_x + target_y*target_y);
-  double N = target_dist/(delta_t*ref_vel);
+  double target_dist = sqrt(target_x*target_x + target_y*target_y); // approx.
+  double N = target_dist/(delta_t*target_vel);
   double delta_x = target_x/N;
   double x_v = 0.0;
   double y_v; 
-
-  //cout << "N = " << N << endl;
 
   const int MAX_PATH_LENGTH = 50;
   for (int i = prev_path_length; i < MAX_PATH_LENGTH; ++i) {
@@ -115,32 +98,108 @@ void Vehicle::compute_path(Road & r) {
 
 }
 
-bool lane_overlap(double d, double target_d, double LANE_WIDTH)
-	{
-	double min_d = target_d - 0.5*LANE_WIDTH;
-	double max_d = target_d + 0.5*LANE_WIDTH;
+bool lane_overlap(double d, double target_d, double lane_width)	{
+	double min_d = target_d - 0.5*lane_width;
+	double max_d = target_d + 0.5*lane_width;
 	return (d > min_d) && (d < max_d);
-		}
+}
 
-bool too_close(double s, double ref_s)
-{
-	const double MIN_DIST = 30.0;
-	return (s > ref_s) && ((s - ref_s) < MIN_DIST);
-  }
+bool too_close(double s, double ref_s, double front_buffer = 30., double rear_buffer = 0.) {
+	if ((s > ref_s) && ((s - ref_s) < front_buffer))
+    return true; // too close in front
+  else 
+    return ((ref_s > s) && (ref_s - s) < rear_buffer);
+}
 
-bool Vehicle::car_close_ahead(const std::vector<std::vector<double>>& sensor_fusion, double target_d, double delta_t, double LANE_WIDTH) {
+bool Vehicle::car_close_ahead(const Road &r) {
 
-  for (int i = 0; i < sensor_fusion.size(); ++i) {
-		double d = sensor_fusion[i][6];
-		if (!lane_overlap(d, target_d, LANE_WIDTH))
-			continue;
-		double vx = sensor_fusion[i][3];
-		double vy = sensor_fusion[i][4];
+  for (int i = 0; i < r.sensor_fusion.size(); ++i) {
+		double d = r.sensor_fusion[i][6];
+		if (!lane_overlap(d, target_d, r.lane_width))
+			continue; // not in our lane
+		double vx = r.sensor_fusion[i][3];
+		double vy = r.sensor_fusion[i][4];
 		double vel = sqrt(vx*vx + vy*vy);
-		double s = sensor_fusion[i][5] + prev_path_length*delta_t*vel; // other car est position in future
+		double s = r.sensor_fusion[i][5] + prev_path_length*delta_t*vel; // other car est position in future
 		if (too_close(s, ref_s))
 			return true;
 	}
 	return false;
  
 }
+
+bool Vehicle::lane_change_blocked(const Road &r, double proposed_d) {
+
+  for (int i = 0; i < r.sensor_fusion.size(); ++i) {
+		double d = r.sensor_fusion[i][6];
+		if (!lane_overlap(d, proposed_d, r.lane_width))
+			continue; // not in the lane we want
+		double vx = r.sensor_fusion[i][3];
+		double vy = r.sensor_fusion[i][4];
+		double vel = sqrt(vx*vx + vy*vy);
+		double s = r.sensor_fusion[i][5] + prev_path_length*delta_t*vel; // other car est position in future
+		if (too_close(s, ref_s, 30.0, 10.0))
+			return true;
+	}
+	return false;
+}
+
+int Vehicle::lane_change_cost(const Road &r, double proposed_d) {
+  // driving off the road?
+  if (proposed_d < 0 || proposed_d > r.lane_count*r.lane_width)
+    return 1000;
+
+  if (lane_change_blocked(r, proposed_d))
+    return 1000;
+
+  return 100;
+}
+
+int Vehicle::keep_lane_cost(const Road &r) {
+  // if car impeding progress, then 200
+  // otherwise zero
+  if (car_close_ahead(r)) {
+    target_vel -= 0.05;
+    return 200;
+  }
+  else if (target_vel < max_vel)
+    target_vel += 0.1;
+
+  return 0;
+}
+
+bool Vehicle::lane_change_complete() {
+  return (abs(target_d - d) < 0.1); // close enough to target_d?
+}
+
+void Vehicle::update_target_state(const Road &r) {
+
+  // update lane change state
+  changing_lanes = changing_lanes && !lane_change_complete();
+
+  if (changing_lanes) {
+    // adjust target_vel?
+    // target_vel = min(max_vel, target_vel + 0.1);
+    return;  // finish lane change in progress
+  }
+
+  // find least costly lane change option
+  int lane_change_d = target_d - r.lane_width; // left lane change
+  int min_change_cost = lane_change_cost(r, lane_change_d);
+
+  int right_d = target_d + r.lane_width;
+  int right_cost = lane_change_cost(r, right_d);
+  if (right_cost < min_change_cost) {
+    min_change_cost = right_cost;
+    lane_change_d = right_d;
+  }
+
+  // compare lane change cost with keep lane
+  changing_lanes = keep_lane_cost(r) > min_change_cost;
+
+  if (changing_lanes) {
+    target_d = lane_change_d;
+  }
+
+}
+

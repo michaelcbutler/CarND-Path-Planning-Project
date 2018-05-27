@@ -6,6 +6,11 @@
 
 class Vehicle {
 public:
+  double delta_t; // time interval for path point generation
+  double max_vel; // speed limit
+
+  bool changing_lanes;
+
   double x;
   double y;
   double s;
@@ -13,13 +18,14 @@ public:
   double yaw;
   double speed;
 
-  double ref_vel;
   double target_vel;
+  double target_d;
 
   double ref_x;
   double ref_y;
   double ref_psi;	// car yaw angle 
   double ref_s;   // s coordinate at reference point
+
   double pred_x;  // position before reference point
   double pred_y;
 
@@ -33,14 +39,21 @@ public:
   double end_path_s;
   double end_path_d;
 
-  Vehicle() {}
+  Vehicle() : changing_lanes(false) {}
 
   void update_ref_state();
-  void compute_path(Road& r);
+
+  void update_target_state(const Road &r);
+  void generate_path_points(const Road &r);
 
 private:
 
-  bool car_close_ahead(const std::vector<std::vector<double>>& sensor_fusion, double target_d, double delta_t, double LANE_WIDTH);
+  bool car_close_ahead(const Road &r);
+  bool lane_change_blocked(const Road &r, double proposed_d);
+  bool lane_change_complete();
+
+  int keep_lane_cost(const Road &r);
+  int lane_change_cost(const Road &r, double proposed_d);
 
 };
 

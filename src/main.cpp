@@ -38,10 +38,13 @@ int main() {
   // Load up map values for waypoint's x,y,s and d normalized normal vectors
 	Road r("../data/highway_map.csv");
 	r.lane_width = 4.0; // meters
+  r.lane_count = 3;
 
 	Vehicle v;
-	v.ref_vel = 0.0; // start from standstill
-	v.target_vel = 49.5*0.44704; // mph converted to m/s
+	v.max_vel = 49.5*0.44704; // mph converted to m/s
+  v.delta_t = 0.02; // sec
+  v.target_d = 0.5*(r.lane_count*r.lane_width);
+	v.target_vel = 0.0; // start from standstill
 
   h.onMessage([&r, &v](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -96,7 +99,8 @@ int main() {
 						}
 					}
 
-					v.compute_path(r);
+					v.update_target_state(r);
+          v.generate_path_points(r);
 
 					// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
 					json msgJson;

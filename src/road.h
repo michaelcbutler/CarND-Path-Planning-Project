@@ -12,10 +12,11 @@ class Road {
   public:
     Road(std::string file_name);
 
-    std::vector<double> getXY(double s, double d);
+    std::vector<double> getXY(double s, double d) const;
 
     std::vector<std::vector<double>> sensor_fusion;
     double lane_width;
+    int lane_count;
 
   private:
     int ClosestWaypoint(double x, double y);
