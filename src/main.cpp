@@ -42,8 +42,8 @@ int main() {
 
 	Vehicle v;
 	v.max_vel = 49.5*0.44704; // mph converted to m/s
-  v.delta_t = 0.02; // sec
-  v.target_d = 0.5*(r.lane_count*r.lane_width);
+  v.delta_t = 0.02; // update rate (sec)
+  v.target_d = 0.5*(r.lane_count*r.lane_width) + 0.1;
 	v.target_vel = 0.0; // start from standstill
 
   h.onMessage([&r, &v](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {

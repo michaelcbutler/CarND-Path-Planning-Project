@@ -11,7 +11,7 @@ public:
 
   bool changing_lanes;
 
-  double x;
+  double x; // current state
   double y;
   double s;
   double d;
@@ -21,7 +21,7 @@ public:
   double target_vel;
   double target_d;
 
-  double ref_x;
+  double ref_x;   // position at end of previous path
   double ref_y;
   double ref_psi;	// car yaw angle 
   double ref_s;   // s coordinate at reference point
@@ -48,8 +48,9 @@ public:
 
 private:
 
-  bool car_close_ahead(const Road &r);
-  bool lane_change_blocked(const Road &r, double proposed_d);
+  bool no_space_to_merge(double est_s, double front_buffer = 30., double rear_buffer = 0.);
+
+  bool car_close_ahead(const Road &r, double &match_vel);
   bool lane_change_complete();
 
   int keep_lane_cost(const Road &r);

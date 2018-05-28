@@ -104,14 +104,8 @@ bool lane_overlap(double d, double target_d, double lane_width)	{
 	return (d > min_d) && (d < max_d);
 }
 
-bool too_close(double s, double ref_s, double front_buffer = 30., double rear_buffer = 0.) {
-	if ((s > ref_s) && ((s - ref_s) < front_buffer))
-    return true; // too close in front
-  else 
-    return ((ref_s > s) && (ref_s - s) < rear_buffer);
-}
 
-bool Vehicle::car_close_ahead(const Road &r) {
+bool Vehicle::car_close_ahead(const Road &r, double &match_vel) {
 
   for (int i = 0; i < r.sensor_fusion.size(); ++i) {
 		double d = r.sensor_fusion[i][6];
@@ -120,15 +114,26 @@ bool Vehicle::car_close_ahead(const Road &r) {
 		double vx = r.sensor_fusion[i][3];
 		double vy = r.sensor_fusion[i][4];
 		double vel = sqrt(vx*vx + vy*vy);
-		double s = r.sensor_fusion[i][5] + prev_path_length*delta_t*vel; // other car est position in future
-		if (too_close(s, ref_s))
+		double est_s = r.sensor_fusion[i][5] + prev_path_length*delta_t*vel; // other car est position in future
+		if ((est_s > ref_s) && ((est_s - ref_s) < 30.0)) {
+      match_vel = vel;  // speed of car ahead
 			return true;
+    }
 	}
 	return false;
- 
 }
 
-bool Vehicle::lane_change_blocked(const Road &r, double proposed_d) {
+bool Vehicle::no_space_to_merge(double est_s, double front_buffer, double rear_buffer) {
+	if ((est_s > ref_s) && ((est_s - ref_s) < front_buffer))
+    return true; // too close in front
+  else 
+    return (ref_s > est_s) && ((ref_s - est_s) < rear_buffer);
+}
+
+int Vehicle::lane_change_cost(const Road &r, double proposed_d) {
+  // driving off the road?
+  if (proposed_d < 0 || proposed_d > r.lane_count*r.lane_width)
+    return 1000;
 
   for (int i = 0; i < r.sensor_fusion.size(); ++i) {
 		double d = r.sensor_fusion[i][6];
@@ -137,49 +142,43 @@ bool Vehicle::lane_change_blocked(const Road &r, double proposed_d) {
 		double vx = r.sensor_fusion[i][3];
 		double vy = r.sensor_fusion[i][4];
 		double vel = sqrt(vx*vx + vy*vy);
-		double s = r.sensor_fusion[i][5] + prev_path_length*delta_t*vel; // other car est position in future
-		if (too_close(s, ref_s, 30.0, 10.0))
-			return true;
+		double est_s = r.sensor_fusion[i][5] + prev_path_length*delta_t*vel; // other car est position in future
+		if (no_space_to_merge(est_s, 50.0, 10.0))
+			return 1000;
 	}
-	return false;
-}
 
-int Vehicle::lane_change_cost(const Road &r, double proposed_d) {
-  // driving off the road?
-  if (proposed_d < 0 || proposed_d > r.lane_count*r.lane_width)
-    return 1000;
-
-  if (lane_change_blocked(r, proposed_d))
-    return 1000;
-
-  return 100;
+  return 100; // TODO: modify for dist
 }
 
 int Vehicle::keep_lane_cost(const Road &r) {
-  // if car impeding progress, then 200
-  // otherwise zero
-  if (car_close_ahead(r)) {
-    target_vel -= 0.05;
+  // car impeding progress?
+  double match_vel;
+  if (car_close_ahead(r, match_vel)) {
+    target_vel = std::max(match_vel, target_vel - 0.05);
     return 200;
   }
   else if (target_vel < max_vel)
     target_vel += 0.1;
 
-  return 0;
+  // prefer center lane
+  return ((target_d < r.lane_width || target_d > 2*r.lane_width) ? 150.0 : 0.0);
 }
 
 bool Vehicle::lane_change_complete() {
-  return (abs(target_d - d) < 0.1); // close enough to target_d?
+  return (fabs(target_d - d) < 0.1); // close enough to target_d?
 }
 
 void Vehicle::update_target_state(const Road &r) {
 
   // update lane change state
-  changing_lanes = changing_lanes && !lane_change_complete();
+  if (changing_lanes && lane_change_complete()) {
+    //std::cout << "lane changed: d = " << d << std::endl;
+    changing_lanes = false;
+  }
 
   if (changing_lanes) {
     // adjust target_vel?
-    // target_vel = min(max_vel, target_vel + 0.1);
+    target_vel = std::min(max_vel, target_vel + 0.1);
     return;  // finish lane change in progress
   }
 
@@ -199,6 +198,7 @@ void Vehicle::update_target_state(const Road &r) {
 
   if (changing_lanes) {
     target_d = lane_change_d;
+    //std::cout << "changing lanes: d = " << d << ", target_d = " << target_d << std::endl;
   }
 
 }
